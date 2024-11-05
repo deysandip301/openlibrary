@@ -28,7 +28,10 @@ from openlibrary.utils import dateutil, olid_to_key
 from openlibrary.plugins.upstream import spamcheck, utils
 from openlibrary.plugins.upstream.account import MyBooksTemplate
 from openlibrary.plugins.worksearch import subjects
-from openlibrary.coverstore.code import render_list_preview_image
+from openlibrary.coverstore.code import (
+    render_list_preview_image,
+    render_collection_preview_image,
+)
 
 
 def subject_key_to_seed(key: subjects.SubjectPseudoKey) -> SeedSubjectString:
@@ -952,5 +955,14 @@ class lists_preview(delegate.page):
 
     def GET(self, lst_key):
         image_bytes = render_list_preview_image(lst_key)
+        web.header("Content-Type", "image/png")
+        return delegate.RawText(image_bytes)
+
+
+class collection_preview(delegate.page):
+    path = r"(/collections/[^/]+)/preview.png"
+
+    def GET(self, collection_key):
+        image_bytes = render_collection_preview_image(collection_key)
         web.header("Content-Type", "image/png")
         return delegate.RawText(image_bytes)

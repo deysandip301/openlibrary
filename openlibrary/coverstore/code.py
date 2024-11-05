@@ -496,71 +496,106 @@ class delete:
 
 
 def render_list_preview_image(lst_key):
-    """This function takes a list of five books and puts their covers in the correct
-    locations to create a new image for social-card"""
+    """Retrieves list data and renders the social preview image."""
     lst = web.ctx.site.get(lst_key)
     five_seeds = lst.seeds[0:5]
+    cover_ids = []
+    for seed in five_seeds:
+        cover = seed.get_cover()
+        if cover:
+            cover_ids.append(cover.id)
+    title = lst.name
+    owner = lst.get_owner()
+    subtitle = f"A list by {owner.displayname}" if owner else "A list on Open Library"
+    return render_social_preview(cover_ids, title, subtitle)
+
+
+def render_collection_preview_image(collection_key):
+    """Retrieves collection data and renders the social preview image."""
+    collection = web.ctx.site.get(collection_key)
+    # Assuming `collection` has an attribute `works` which is a list of work objects
+    works = collection.works[:5]
+    cover_ids = []
+    for work in works:
+        covers = work.get('covers')
+        if covers:
+            cover_ids.append(covers[0])
+    title = collection.name
+    subtitle = "A collection on Open Library"
+    return render_social_preview(cover_ids, title, subtitle)
+
+
+def render_social_preview(cover_ids, title, subtitle):
+    """Renders a social preview image given a list of cover IDs, a title, and a subtitle."""
+    # Load background and logo images
     background = Image.open(
         "/openlibrary/static/images/Twitter_Social_Card_Background.png"
     )
-
     logo = Image.open("/openlibrary/static/images/Open_Library_logo.png")
-
     W, H = background.size
-    image = []
-    for seed in five_seeds:
-        cover = seed.get_cover()
 
-        if cover:
+    # Download and process cover images
+    images = []
+    for cover_id in cover_ids:
+        if cover_id:
             response = requests.get(
-                f"https://covers.openlibrary.org/b/id/{cover.id}-M.jpg"
+                f"https://covers.openlibrary.org/b/id/{cover_id}-M.jpg"
             )
-            image_bytes = io.BytesIO(response.content)
+            if response.status_code == 200:
+                image_bytes = io.BytesIO(response.content)
+                img = Image.open(image_bytes)
+                basewidth = 162
+                wpercent = basewidth / float(img.size[0])
+                hsize = int(float(img.size[1]) * float(wpercent))
+                img = img.resize((basewidth, hsize), Image.LANCZOS)
+                images.append(img)
 
-            img = Image.open(image_bytes)
+    # Calculate the max height of the images
+    max_height = max((img.size[1] for img in images), default=0)
 
-            basewidth = 162
-            wpercent = basewidth / float(img.size[0])
-            hsize = int(float(img.size[1]) * float(wpercent))
-            img = img.resize((basewidth, hsize), Image.LANCZOS)
-            image.append(img)
-    max_height = 0
-    for img in image:
-        max_height = max(img.size[1], max_height)
-    start_width = 63 + 92 * (5 - len(image))
-    for img in image:
+    # Calculate starting width to center images
+    start_width = 63 + 92 * (5 - len(images))
+
+    # Paste cover images onto the background
+    for img in images:
         background.paste(img, (start_width, 174 + max_height - img.size[1]))
         start_width += 184
 
+    # Paste the logo
     logo = logo.resize((120, 74), Image.LANCZOS)
     background.paste(logo, (880, 14), logo)
 
+    # Draw text (title and subtitle)
     draw = ImageDraw.Draw(background)
-    font_author = ImageFont.truetype(
+    font_subtitle = ImageFont.truetype(
         "/openlibrary/static/fonts/NotoSans-LightItalic.ttf", 22
     )
     font_title = ImageFont.truetype(
         "/openlibrary/static/fonts/NotoSans-SemiBold.ttf", 28
     )
 
-    para = textwrap.wrap(lst.name, width=45)
+    # Wrap title text
+    title_lines = textwrap.wrap(title, width=45)
     current_h = 42
 
-    author_text = "A list on Open Library"
-    if owner := lst.get_owner():
-        author_text = f"A list by {owner.displayname}"
+    # Draw subtitle
+    subtitle_bbox = font_subtitle.getbbox(subtitle)
+    subtitle_w = subtitle_bbox[2] - subtitle_bbox[0]
+    subtitle_h = subtitle_bbox[3] - subtitle_bbox[1]
+    draw.text(
+        ((W - subtitle_w) / 2, current_h), subtitle, font=font_subtitle, fill=(0, 0, 0)
+    )
+    current_h += subtitle_h + 5
 
-    left, top, right, bottom = font_author.getbbox(author_text)
-    w, h = right - left, bottom - top
-    draw.text(((W - w) / 2, current_h), author_text, font=font_author, fill=(0, 0, 0))
-    current_h += h + 5
+    # Draw title
+    for line in title_lines:
+        title_bbox = font_title.getbbox(line)
+        title_w = title_bbox[2] - title_bbox[0]
+        title_h = title_bbox[3] - title_bbox[1]
+        draw.text(((W - title_w) / 2, current_h), line, font=font_title, fill=(0, 0, 0))
+        current_h += title_h
 
-    for line in para:
-        left, top, right, bottom = font_title.getbbox(line)
-        w, h = right - left, bottom - top
-        draw.text(((W - w) / 2, current_h), line, font=font_title, fill=(0, 0, 0))
-        current_h += h
-
+    # Save image to bytes
     with io.BytesIO() as buf:
         background.save(buf, format='PNG')
         return buf.getvalue()
